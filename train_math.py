@@ -76,6 +76,12 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},
     )
     overwrite_output_dir: bool = field(default=True)
+    tune_layers: str = field(
+        default="all",
+        metadata={
+            "help": "Layers to tune. Format: 'all' | '3' | '3-7' | '1,3,5' | '1-3,5,7-9'"
+        },
+    )
 
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
@@ -246,6 +252,117 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
     return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)
 
 
+def parse_layer_spec(layer_spec: str, num_layers: int) -> set[int]:
+    """Parse layer specification string into set of layer indices.
+
+    Args:
+        layer_spec (str): Layer specification in formats:
+            - 'all': all layers
+            - Single number: '3'
+            - Range: '3-7'
+            - Comma-separated: '1,3,5'
+            - Mixed: '1-3,5,7-9'
+        num_layers (int): Total number of layers in model
+
+    Returns:
+        set[int]: Set of layer indices to tune
+    """
+    if layer_spec.lower() == 'all':
+        return set(range(num_layers))
+
+    layers = set()
+    for part in layer_spec.split(','):
+        if '-' in part:
+            start, end = map(int, part.split('-'))
+            layers.update(range(start, end + 1))
+        else:
+            layers.add(int(part))
+
+    # Validate indices
+    if max(layers) >= num_layers or min(layers) < 0:
+        raise ValueError(f"Layer indices must be between 0 and {num_layers-1}")
+
+    return layers
+
+def freeze_layers(model: transformers.PreTrainedModel, tune_layers: str):
+    """Freeze all layers except those specified in tune_layers.
+
+    Args:
+        model: The transformer model
+        tune_layers: Layer specification string
+    """
+    # Get number of layers based on model architecture
+    if hasattr(model.config, 'num_hidden_layers'):
+        num_layers = model.config.num_hidden_layers
+    else:
+        raise ValueError("Could not determine number of layers in model")
+
+    layers_to_tune = parse_layer_spec(tune_layers, num_layers)
+
+    # Freeze all parameters first
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # Unfreeze specified layers
+    tuned_params = 0
+    total_params = 0
+
+    for name, param in model.named_parameters():
+        total_params += param.numel()
+        should_tune = False
+
+        # Check if parameter belongs to a transformer layer
+        if '.layers.' in name:
+            layer_idx = int(name.split('.layers.')[1].split('.')[0])
+            should_tune = layer_idx in layers_to_tune
+        # Always tune layer norms and final layer
+        elif any(x in name for x in ['norm', 'lm_head']):
+            should_tune = True
+
+        if should_tune:
+            param.requires_grad = True
+            tuned_params += param.numel()
+
+    logging.info(f"Tuning {len(layers_to_tune)}/{num_layers} layers: {sorted(layers_to_tune)}")
+    logging.info(f"Trainable params: {tuned_params:,} ({tuned_params/total_params:.1%} of total)")
+    logging.info("Note: Layer normalization and output layer parameters are always tuned")
+
+def log_model_parameters(model: transformers.PreTrainedModel, log_file: str = "model_params.log"):
+    """Log detailed information about model parameters.
+
+    Args:
+        model: The transformer model
+        log_file: Path to output log file
+    """
+    total_params = 0
+    trainable_params = 0
+
+    # Open log file
+    with open(log_file, 'w') as f:
+        f.write(f"{'Parameter Name':<60} {'Shape':<20} {'Trainable':<10} {'#Params':<12}\n")
+        f.write("-" * 102 + "\n")
+
+        # Log details for each parameter
+        for name, param in model.named_parameters():
+            num_params = param.numel()
+            total_params += num_params
+            if param.requires_grad:
+                trainable_params += num_params
+
+            # Format shape as string
+            shape_str = str(tuple(param.shape))
+
+            # Write parameter details
+            f.write(f"{name:<60} {shape_str:<20} {str(param.requires_grad):<10} {num_params:<12,}\n")
+
+        # Write summary
+        f.write("\n" + "=" * 102 + "\n")
+        f.write(f"Total Parameters:      {total_params:,}\n")
+        f.write(f"Trainable Parameters:  {trainable_params:,} ({trainable_params/total_params:.2%})\n")
+        f.write(f"Frozen Parameters:     {total_params-trainable_params:,} ({1-trainable_params/total_params:.2%})\n")
+
+    logging.info(f"Parameter details logged to {log_file}")
+
 def train():
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args, remaining_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
@@ -279,6 +396,13 @@ def train():
         )
 
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
+
+    # Add layer freezing after model loading
+    if training_args.tune_layers != "all":
+        freeze_layers(model, training_args.tune_layers)
+    # Log parameter details after freezing
+    os.makedirs(training_args.output_dir, exist_ok=True)
+    log_model_parameters(model, os.path.join(training_args.output_dir, "model_params.log"))
     trainer = Trainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
     trainer.train()
     trainer.save_state()

@@ -23,6 +23,12 @@ export NCCL_SOCKET_IFNAME="lo"
 export WANDB_DISABLED=true
 wandb offline
 
+# tune layers
+tune_layers=${l:-"all"}
+if [ "$tune_layers" != "all" ]; then
+    SAVE_PATH="${SAVE_PATH}_l${tune_layers}"
+fi
+
 total_batch_size=128
 per_device_train_batch_size=2
 gradient_accumulation_steps=$((total_batch_size / per_device_train_batch_size))
@@ -34,6 +40,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --master_addr ${MASTER_ADDR} --mas
     --bf16 True \
     --output_dir $SAVE_PATH \
     --num_train_epochs 3 \
+    --tune_layers $tune_layers \
     --per_device_train_batch_size $per_device_train_batch_size \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps $gradient_accumulation_steps \
