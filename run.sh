@@ -14,7 +14,7 @@ if [ ! -f "$DATA_PATH" ]; then
 fi
 
 export MODEL_PATH="meta-llama/Llama-2-7b-hf"
-export SAVE_PATH='checkpoints/llama-2-7b-hf'
+export SAVE_PATH='checkpoints/llama-2-7b-ft'
 export MASTER_ADDR="localhost"
 # random port
 export MASTER_PORT=$(expr 10000 + $(od -An -N2 -i /dev/urandom) % 10000)
