@@ -5,6 +5,9 @@ import jsonlines
 from fraction import Fraction
 from vllm import LLM, SamplingParams
 import sys
+import os
+import csv
+from datetime import datetime
 MAX_INT = sys.maxsize
 
 def is_number(s):
@@ -105,20 +108,81 @@ def gsm8k_test(model, data_path, start=0, end=MAX_INT, batch_size=1, tensor_para
             res_completions.append(generated_text)
 
     invalid_outputs = []
+    detailed_results = []  # Store detailed results for each question
     for idx, (prompt, completion, prompt_answer) in enumerate(zip(gsm8k_ins, res_completions, gsm8k_answers)):
-        doc = {'question': prompt}
         y_pred = extract_answer_number(completion)
-        if y_pred != None:
-            result.append(float(y_pred) == float(prompt_answer))
+        is_correct = False
+        if y_pred is not None:
+            is_correct = float(y_pred) == float(prompt_answer)
+            result.append(is_correct)
         else:
             result.append(False)
             temp = {'question': prompt, 'output': completion, 'answer': prompt_answer}
             invalid_outputs.append(temp)
+
+        # Store detailed result for each question
+        detailed_results.append({
+            'question': prompt,
+            'predicted': y_pred,
+            'true_answer': prompt_answer,
+            'model_output': completion,
+            'is_correct': is_correct,
+        })
+
     acc = sum(result) / len(result)
     print('len invalid outputs ====', len(invalid_outputs), ', valid_outputs===', invalid_outputs)
     print('start===', start, ', end====', end)
     print('gsm8k length====', len(result), ', gsm8k acc====', acc)
 
+    # Return results for optional file output
+    return {
+        'accuracy': acc,
+        'total_samples': len(result),
+        'invalid_count': len(invalid_outputs),
+        'detailed_results': detailed_results
+    }
+
+def save_results(results, output_dir):
+    """
+    Save evaluation results to a directory structure.
+
+    Args:
+        results (dict): Dictionary containing evaluation results
+        output_dir (str): Directory path to save results
+
+    Creates:
+        - output_dir/
+            - detailed_results.json: Full evaluation details
+            - summary.csv: Basic metrics in CSV format
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save detailed results as JSON
+    detailed_path = os.path.join(output_dir, 'detailed_results.json')
+    with open(detailed_path, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
+    # Save summary as CSV
+    summary_path = os.path.join(output_dir, 'summary.csv')
+    summary_data = {
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'accuracy': results['accuracy'],
+        'total_samples': results['total_samples'],
+        'invalid_count': results['invalid_count'],
+        'valid_count': results['total_samples'] - results['invalid_count']
+    }
+
+    # Check if file exists to determine if we need to write headers
+    file_exists = os.path.isfile(summary_path)
+    with open(summary_path, 'a', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=summary_data.keys())
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(summary_data)
+
+    print(f"\nResults saved to directory: {output_dir}")
+    print(f"- Detailed results: {detailed_path}")
+    print(f"- Summary CSV: {summary_path}")
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -128,7 +192,22 @@ def parse_args():
     parser.add_argument("--end", type=int, default=MAX_INT)  # end index
     parser.add_argument("--batch_size", type=int, default=400)  # batch_size
     parser.add_argument("--tensor_parallel_size", type=int, default=8)  # tensor_parallel_size
+    parser.add_argument("-o", "--output_dir", type=str, help="Directory to save evaluation results (optional)")
     return parser.parse_args()
+
 if __name__ == "__main__":
     args = parse_args()
-    gsm8k_test(model=args.model, data_path=args.data_file, start=args.start, end=args.end, batch_size=args.batch_size, tensor_parallel_size=args.tensor_parallel_size)
+    if not args.output_dir:
+        args.output_dir = f'outputs/gsm8k/{args.model.split("/")[-1]}'
+    results = gsm8k_test(
+        model=args.model,
+        data_path=args.data_file,
+        start=args.start,
+        end=args.end,
+        batch_size=args.batch_size,
+        tensor_parallel_size=args.tensor_parallel_size
+    )
+
+    # Save results to directory if specified
+    if args.output_dir:
+        save_results(results, args.output_dir)

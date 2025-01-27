@@ -2,6 +2,9 @@ import argparse
 import json
 import pdb
 import jsonlines
+import os
+import csv
+from datetime import datetime
 
 import util
 from vllm import LLM, SamplingParams
@@ -9,7 +12,6 @@ import sys
 MAX_INT = sys.maxsize
 INVALID_ANS = "[invalid]"
 
-invalid_outputs = []
 def remove_boxed(s):
     left = "\\boxed{"
     try:
@@ -30,14 +32,19 @@ def process_results(doc, completion, answer):
         else:
             extract_ans = extract_ans_temp
         extract_ans = extract_ans.strip()
-        if util.is_equiv(extract_ans, answer):
-            return True
-        else:
-            return False
+        is_correct = util.is_equiv(extract_ans, answer)
+        return {
+            'extracted_answer': extract_ans,
+            'is_correct': is_correct,
+            'is_invalid': False
+        }
     else:
-        temp = {'question': doc, 'output': completion, 'answer': answer}
-        invalid_outputs.append(temp)
-        return False
+        return {
+            'extracted_answer': None,
+            'is_correct': False,
+            'is_invalid': True
+        }
+
 def batch_data(data_list, batch_size=1):
     n = len(data_list) // batch_size
     batch_data = []
@@ -90,15 +97,83 @@ def test_hendrycks_math(model, data_path, start=0, end=MAX_INT, batch_size=1, te
             generated_text = output.outputs[0].text
             res_completions.append(generated_text)
 
-    results = []
-    for idx, (prompt, completion, prompt_answer) in enumerate(zip(hendrycks_math_ins, res_completions, hendrycks_math_answers)):
-        res = process_results(prompt, completion, prompt_answer)
-        results.append(res)
+    detailed_results = []
+    invalid_count = 0
+    correct_count = 0
 
-    acc = sum(results) / len(results)
-    print('len invalid outputs ====', len(invalid_outputs), ', valid_outputs===', invalid_outputs)
-    print('start===', start, ', end====',end)
-    print('length====', len(results), ', acc====', acc)
+    for idx, (prompt, completion, prompt_answer) in enumerate(zip(hendrycks_math_ins, res_completions, hendrycks_math_answers)):
+        result = process_results(prompt, completion, prompt_answer)
+        if result['is_invalid']:
+            invalid_count += 1
+        if result['is_correct']:
+            correct_count += 1
+
+        detailed_results.append({
+            'question': prompt,
+            'model_output': completion,
+            'true_answer': prompt_answer,
+            'predicted': result['extracted_answer'],
+            'is_correct': result['is_correct'],
+            'is_invalid': result['is_invalid']
+        })
+
+    total_samples = len(detailed_results)
+    accuracy = correct_count / total_samples
+
+    print('Invalid outputs:', invalid_count)
+    print('start===', start, ', end====', end)
+    print('Total samples:', total_samples, ', Accuracy:', accuracy)
+
+    return {
+        'accuracy': accuracy,
+        'total_samples': total_samples,
+        'invalid_count': invalid_count,
+        'correct_count': correct_count,
+        'detailed_results': detailed_results
+    }
+
+def save_results(results, output_dir):
+    """
+    Save evaluation results to a directory structure.
+
+    Args:
+        results (dict): Dictionary containing evaluation results
+        output_dir (str): Directory path to save results
+
+    Creates:
+        - output_dir/
+            - detailed_results.json: Full evaluation details
+            - summary.csv: Basic metrics in CSV format
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save detailed results as JSON
+    detailed_path = os.path.join(output_dir, 'detailed_results.json')
+    with open(detailed_path, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
+    # Save summary as CSV
+    summary_path = os.path.join(output_dir, 'summary.csv')
+    summary_data = {
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'accuracy': results['accuracy'],
+        'total_samples': results['total_samples'],
+        'invalid_count': results['invalid_count'],
+        'correct_count': results['correct_count'],
+        'valid_count': results['total_samples'] - results['invalid_count']
+    }
+
+    # Check if file exists to determine if we need to write headers
+    file_exists = os.path.isfile(summary_path)
+    with open(summary_path, 'a', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=summary_data.keys())
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(summary_data)
+
+    print(f"\nResults saved to directory: {output_dir}")
+    print(f"- Detailed results: {detailed_path}")
+    print(f"- Summary CSV: {summary_path}")
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -108,8 +183,22 @@ def parse_args():
     parser.add_argument("--end", type=int, default=MAX_INT)  # end index
     parser.add_argument("--batch_size", type=int, default=400)  # batch_size
     parser.add_argument("--tensor_parallel_size", type=int, default=8)  # tensor_parallel_size
+    parser.add_argument("-o", "--output_dir", type=str, help="Directory to save evaluation results (optional)")
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = parse_args()
-    test_hendrycks_math(model=args.model, data_path=args.data_file, start=args.start, end=args.end, batch_size=args.batch_size, tensor_parallel_size=args.tensor_parallel_size)
+    if not args.output_dir:
+        args.output_dir = f'outputs/meta_math/{args.model.split("/")[-1]}'
+    results = test_hendrycks_math(
+        model=args.model,
+        data_path=args.data_file,
+        start=args.start,
+        end=args.end,
+        batch_size=args.batch_size,
+        tensor_parallel_size=args.tensor_parallel_size
+    )
+
+    # Save results to directory if specified
+    if args.output_dir:
+        save_results(results, args.output_dir)
