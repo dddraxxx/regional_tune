@@ -57,5 +57,5 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --master_addr ${MASTER_ADDR} --mas
     --fsdp_transformer_layer_cls_to_wrap 'LlamaDecoderLayer' \
     --tf32 True
 
-python eval_gsm8k.py --model $SAVE_PATH --data_path ./data/test/GSM8K_test.jsonl
-python eval_math.py --model $SAVE_PATH --data_path ./data/test/MATH_test.jsonl
+python eval_gsm8k.py --model $SAVE_PATH --data_file ./data/test/GSM8K_test.jsonl
+python eval_math.py --model $SAVE_PATH --data_file ./data/test/MATH_test.jsonl
