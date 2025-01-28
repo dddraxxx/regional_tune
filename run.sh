@@ -33,9 +33,11 @@ total_batch_size=128
 per_device_train_batch_size=2
 gradient_accumulation_steps=$((total_batch_size / per_device_train_batch_size))
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=8 train_math.py \
-    --model_name_or_path $MODEL_PATH \
-    --data_path $DATA_PATH \
+eval_only=${eval_only:-false}
+if [ "$eval_only" != "1" ]; then
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=8 train_math.py \
+        --model_name_or_path $MODEL_PATH \
+        --data_path $DATA_PATH \
     --data_length 10000000 \
     --bf16 True \
     --output_dir $SAVE_PATH \
@@ -56,6 +58,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --master_addr ${MASTER_ADDR} --mas
     --fsdp "full_shard auto_wrap" \
     --fsdp_transformer_layer_cls_to_wrap 'LlamaDecoderLayer' \
     --tf32 True
+fi
 
 python eval_gsm8k.py --model $SAVE_PATH --data_file ./data/test/GSM8K_test.jsonl
 python eval_math.py --model $SAVE_PATH --data_file ./data/test/MATH_test.jsonl
