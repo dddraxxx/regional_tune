@@ -7,6 +7,9 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.10/site-packages/nvidia/nvjitli
 
 # Add dataset choice
 export DATASET=${data:-"metamath"}  # Default to metamath
+export DATA_PERCENT=${dp:-100}  # Default to 100% of data
+ep=${ep:-3}
+
 case $DATASET in
     "metamath")
         export DATA_PATH="data/MetaMathQA/MetaMathQA-395K.json"
@@ -32,7 +35,8 @@ case $DATASET in
 esac
 
 export MODEL_PATH="meta-llama/Llama-2-7b-hf"
-export SAVE_PATH='checkpoints/'$DATASET'/llama-2-7b-ft'
+base_save_dir=${bsd:-"checkpoints"}
+export SAVE_PATH=$base_save_dir'/'$DATASET'/llama-2-7b-ft'
 export MASTER_ADDR="localhost"
 # random port
 export MASTER_PORT=$(expr 10000 + $(od -An -N2 -i /dev/urandom) % 10000)
@@ -67,9 +71,10 @@ if [ "$eval_only" != "1" ]; then
         --model_name_or_path $MODEL_PATH \
         --data_path $DATA_PATH \
         --data_length 10000000 \
+        --data_percent $DATA_PERCENT \
         --bf16 True \
         --output_dir $SAVE_PATH \
-        --num_train_epochs 3 \
+        --num_train_epochs $ep \
         --tune_layers $tune_layers \
         --per_device_train_batch_size $per_device_train_batch_size \
         --per_device_eval_batch_size 4 \

@@ -65,6 +65,8 @@ class ModelArguments:
 @dataclass
 class DataArguments:
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_length: int = field(default=None, metadata={"help": "Number of samples to use"})
+    data_percent: float = field(default=100.0, metadata={"help": "Percentage of data to use (0-100)"})
 
 
 @dataclass
@@ -172,8 +174,21 @@ class SupervisedDataset(Dataset):
                 lines = f.readlines()
             list_data_dict = [json.loads(line.strip()) for line in lines]
 
-        list_data_dict = random.sample(list_data_dict,  len(list_data_dict))
-        list_data_dict = list_data_dict[:data_args.data_length]
+        # Store original data length and data percent for logging
+        self.original_data = list_data_dict
+        self.data_percent = data_args.data_percent
+
+        # Apply data percentage before random sampling
+        if data_args.data_percent < 100:
+            num_samples = int(len(list_data_dict) * data_args.data_percent / 100)
+            list_data_dict = list_data_dict[:num_samples]
+
+        # Random sampling
+        list_data_dict = random.sample(list_data_dict, len(list_data_dict))
+        if data_args.data_length is not None:
+            list_data_dict = list_data_dict[:data_args.data_length]
+
+        self.list_data_dict = list_data_dict
 
         # logging.warning("Formatting inputs...")
         prompt_input, prompt_no_input = PROMPT_DICT["prompt_input"], PROMPT_DICT["prompt_no_input"]
@@ -372,10 +387,61 @@ def log_model_parameters(model: transformers.PreTrainedModel, log_file: str = "m
 
     logging.info(f"Parameter details logged to {log_file}")
 
+def log_dataset_statistics(dataset, log_file: str = "dataset_stats.log"):
+    """Log detailed information about dataset statistics.
+
+    Args:
+        dataset: The SupervisedDataset instance
+        log_file: Path to output log file
+    """
+    with open(log_file, 'w') as f:
+        f.write("Dataset Statistics\n")
+        f.write("=" * 50 + "\n\n")
+
+        # Basic counts
+        total_samples = len(dataset.original_data)
+        used_samples = len(dataset)
+        f.write(f"Total samples in original dataset: {total_samples:,}\n")
+        f.write(f"Samples used after {dataset.data_percent}% selection: {used_samples:,}\n\n")
+
+        # Analyze instruction/input/output stats
+        instruction_lengths = []
+        input_lengths = []
+        output_lengths = []
+        samples_with_input = 0
+
+        for item in dataset.list_data_dict:
+            instruction_lengths.append(len(item['instruction'].split()))
+            if item.get('input', '').strip():
+                samples_with_input += 1
+                input_lengths.append(len(item['input'].split()))
+            output_lengths.append(len(item['output'].split()))
+
+        # Write length statistics
+        f.write("Length Statistics (in words):\n")
+        f.write("-" * 30 + "\n")
+        f.write(f"Instructions:\n")
+        f.write(f"  - Average length: {sum(instruction_lengths)/len(instruction_lengths):.1f}\n")
+        f.write(f"  - Min length: {min(instruction_lengths)}\n")
+        f.write(f"  - Max length: {max(instruction_lengths)}\n\n")
+
+        if input_lengths:
+            f.write(f"Inputs:\n")
+            f.write(f"  - Average length: {sum(input_lengths)/len(input_lengths):.1f}\n")
+            f.write(f"  - Min length: {min(input_lengths)}\n")
+            f.write(f"  - Max length: {max(input_lengths)}\n")
+            f.write(f"  - Samples with input: {samples_with_input:,} ({samples_with_input/used_samples:.1%})\n\n")
+
+        f.write(f"Outputs:\n")
+        f.write(f"  - Average length: {sum(output_lengths)/len(output_lengths):.1f}\n")
+        f.write(f"  - Min length: {min(output_lengths)}\n")
+        f.write(f"  - Max length: {max(output_lengths)}\n")
+
+    logging.info(f"Dataset statistics logged to {log_file}")
+
 def train():
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args, remaining_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
-    data_args.data_length = int(remaining_args[1])
 
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
@@ -418,6 +484,7 @@ def train():
     # if os.environ.get('LOCAL_RANK') == '0':
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
 
+    log_dataset_statistics(data_module['train_dataset'])
 
 if __name__ == "__main__":
     train()
