@@ -54,6 +54,10 @@ tune_layers=${l:-"all"}
 if [ "$tune_layers" != "all" ]; then
     SAVE_PATH="${SAVE_PATH}_l${tune_layers}"
 fi
+SAVE_PATH="${SAVE_PATH}_ep${ep}"
+if [ "$dp" != "100" ]; then
+    SAVE_PATH="${SAVE_PATH}dp${dp}"
+fi
 
 per_device_train_batch_size=2
 
