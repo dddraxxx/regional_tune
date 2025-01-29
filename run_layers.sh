@@ -1,5 +1,5 @@
 export data='metamath'
-# export data='gsm8k'
+export data='gsm8k'
 
 ############### Layers ###############
 bash run.sh

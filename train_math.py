@@ -484,7 +484,7 @@ def train():
     # if os.environ.get('LOCAL_RANK') == '0':
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
 
-    log_dataset_statistics(data_module['train_dataset'])
+    # log_dataset_statistics(data_module['train_dataset'])
 
 if __name__ == "__main__":
     train()

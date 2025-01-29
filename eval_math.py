@@ -189,7 +189,8 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     if not args.output_dir:
-        args.output_dir = f'outputs/meta_math/{args.model.split("/")[-1]}'
+        model_rel_path = os.path.relpath(args.model, 'checkpoints/')
+        args.output_dir = f'outputs/{model_rel_path}'
     results = test_hendrycks_math(
         model=args.model,
         data_path=args.data_file,
