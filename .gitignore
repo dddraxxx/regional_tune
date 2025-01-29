@@ -7,3 +7,5 @@ wandb/
 outputs/
 data/
 __pycache__/
+
+outputs*/
