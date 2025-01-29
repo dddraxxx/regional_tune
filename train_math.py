@@ -325,7 +325,7 @@ def freeze_layers(model: transformers.PreTrainedModel, tune_layers: str):
             layer_idx = int(name.split('.layers.')[1].split('.')[0])
             should_tune = layer_idx in layers_to_tune
         # Always tune layer norms and final layer
-        elif any(x in name for x in ['norm', 'lm_head']):
+        elif any(x in name for x in ['norm', 'lm_head', 'embed_tokens']):
             should_tune = True
 
         if should_tune:

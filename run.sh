@@ -50,13 +50,18 @@ fi
 total_batch_size=128
 per_device_train_batch_size=2
 
-cuda_device=${CUDA_VISIBLE_DEVICES:-"1,2,3,4,5,6,7"}
-gradient_accumulation_steps=$((total_batch_size / per_device_train_batch_size / ${#cuda_device}))
-echo "using cuda device: $cuda_device"
+gpu_ids=${CUDA_VISIBLE_DEVICES:-"0,1,2,3,4,5,6,7"}
+IFS=',' read -ra GPU_ARRAY <<< "$gpu_ids"
+num_gpus=${#GPU_ARRAY[@]}
+export CUDA_VISIBLE_DEVICES=${gpu_ids}
+gradient_accumulation_steps=$((total_batch_size / per_device_train_batch_size / num_gpus))
+echo "using cuda device: $gpu_ids"
+echo "number of GPUs: $num_gpus"
 echo "gradient accumulation steps: $gradient_accumulation_steps"
+
 eval_only=${eval_only:-false}
 if [ "$eval_only" != "1" ]; then
-    ddp_cmd="torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=${#cuda_device}"
+    ddp_cmd="torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=${num_gpus} --nnodes=1"
     py_cmd="python"
     args=("train_math.py \
         --model_name_or_path $MODEL_PATH \
@@ -78,14 +83,12 @@ if [ "$eval_only" != "1" ]; then
         --warmup_ratio 0.03 \
         --lr_scheduler_type cosine \
         --logging_steps 3 \
-        --fsdp full_shard auto_wrap \
         --fsdp_transformer_layer_cls_to_wrap LlamaDecoderLayer \
         --tf32 True")
-    if [ ${#cuda_device} -gt 1 ]; then
+    if [ $num_gpus -gt 1 ]; then
         echo "run: ${ddp_cmd} ${args}"
-        CUDA_VISIBLE_DEVICES=${cuda_device} ${ddp_cmd} ${args}
+        ${ddp_cmd} ${args} --fsdp "full_shard auto_wrap"
     else
-        # echo "run: ${py_cmd} ${args}"
         ${py_cmd} ${args}
     fi
 fi
