@@ -178,15 +178,24 @@ class SupervisedDataset(Dataset):
         # logging.warning("Formatting inputs...")
         prompt_input, prompt_no_input = PROMPT_DICT["prompt_input"], PROMPT_DICT["prompt_no_input"]
         # print(list_data_dict[0])
+        def get_input(query):
+            if query.find('\n') == -1:
+                return ''
+            return '\n'.join(query.split('\n')[1:])
         if 'instruction' in list_data_dict[0]:
             pass
-        else:
-            def get_input(query):
-                if query.find('\n') == -1:
-                    return ''
-                return '\n'.join(query.split('\n')[1:])
-            list_data_dict = [{'instruction':data['query'].split('\n')[0], 'input':get_input(data['query']), 'output':data['response']} for data in list_data_dict]
-        # import ipdb; ipdb.set_trace()
+        elif 'question' in list_data_dict[0]:  # GSM8K format
+            list_data_dict = [{
+                'instruction': data['question'].split('\n')[0],
+                'input': get_input(data['question']),
+                'output': data['answer']
+            } for data in list_data_dict]
+        else:  # MetaMath format with 'query'
+            list_data_dict = [{'instruction':data['query'].split('\n')[0],
+                             'input':get_input(data['query']),
+                             'output':data['response']}
+                            for data in list_data_dict]
+
         sources = [
             prompt_input.format_map(example) if example.get("input", "") != "" else prompt_no_input.format_map(example)
             for example in list_data_dict
