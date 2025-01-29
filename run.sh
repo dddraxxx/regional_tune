@@ -8,8 +8,8 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.10/site-packages/nvidia/nvjitli
 # Add dataset choice
 export DATASET=${data:-"metamath"}  # Default to metamath
 export DATA_PERCENT=${dp:-100}  # Default to 100% of data
-ep=${ep:-3}
 
+# total_batch_size=128
 case $DATASET in
     "metamath")
         export DATA_PATH="data/MetaMathQA/MetaMathQA-395K.json"
@@ -18,6 +18,8 @@ case $DATASET in
             PARENT_DIR=$(dirname "$DATA_PATH")
             git clone https://huggingface.co/datasets/meta-math/MetaMathQA "$PARENT_DIR"
         fi
+        total_batch_size=128
+        ep=${ep:-3}
         ;;
     "gsm8k")
         export DATA_PATH="data/gsm8k/train.jsonl"
@@ -27,6 +29,8 @@ case $DATASET in
             mkdir -p "$PARENT_DIR"
             wget https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/train.jsonl -O "$DATA_PATH"
         fi
+        total_batch_size=64
+        ep=${ep:-1}
         ;;
     *)
         echo "Unknown dataset: $DATASET"
@@ -51,7 +55,6 @@ if [ "$tune_layers" != "all" ]; then
     SAVE_PATH="${SAVE_PATH}_l${tune_layers}"
 fi
 
-total_batch_size=128
 per_device_train_batch_size=2
 
 gpu_ids=${CUDA_VISIBLE_DEVICES:-"0,1,2,3,4,5,6,7"}
