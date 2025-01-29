@@ -58,7 +58,7 @@ eval_only=${eval_only:-false}
 if [ "$eval_only" != "1" ]; then
     ddp_cmd="torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=${#cuda_device}"
     py_cmd="python"
-    args="train_math.py \
+    args=("train_math.py \
         --model_name_or_path $MODEL_PATH \
         --data_path $DATA_PATH \
         --data_length 10000000 \
@@ -80,15 +80,14 @@ if [ "$eval_only" != "1" ]; then
         --logging_steps 3 \
         --fsdp full_shard auto_wrap \
         --fsdp_transformer_layer_cls_to_wrap LlamaDecoderLayer \
-        --tf32 True"
+        --tf32 True")
     if [ ${#cuda_device} -gt 1 ]; then
-        # echo "run: ${ddp_cmd} ${args}"
+        echo "run: ${ddp_cmd} ${args}"
         CUDA_VISIBLE_DEVICES=${cuda_device} ${ddp_cmd} ${args}
     else
         # echo "run: ${py_cmd} ${args}"
         ${py_cmd} ${args}
     fi
 fi
-
 python eval_gsm8k.py --model $SAVE_PATH --data_file ./data/test/GSM8K_test.jsonl
 python eval_math.py --model $SAVE_PATH --data_file ./data/test/MATH_test.jsonl
