@@ -88,10 +88,6 @@ class TrainingArguments(transformers.TrainingArguments):
             "help": "Layers to tune. Format: 'all' | '3' | '3-7' | '1,3,5' | '1-3,5,7-9'"
         },
     )
-    report_to: str = field(
-        default="wandb",
-        metadata={"help": "Report to wandb or not"},
-    )
 
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
@@ -372,6 +368,7 @@ def log_model_parameters(model: transformers.PreTrainedModel, log_file: str = "m
     trainable_params = 0
 
     # Open log file
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
     with open(log_file, 'w') as f:
         f.write(f"{'Parameter Name':<60} {'Shape':<20} {'Trainable':<10} {'#Params':<12}\n")
         f.write("-" * 102 + "\n")
@@ -472,23 +469,14 @@ def train():
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args, remaining_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
 
-    # Initialize wandb
-    if training_args.report_to == "wandb":
-        # Extract dataset name from data path
+    # Only initialize wandb on main process or when not using DDP
+    if training_args.local_rank in {-1, 0} and "wandb" in training_args.report_to:
         dataset_name = os.path.basename(data_args.data_path).split('.')[0]
-        output_dir_base = training_args.output_dir.split('/')[-1],
+        output_dir_base = training_args.output_dir.split('/')[-1]
         wandb.init(
             name=f"{dataset_name}.{output_dir_base}",
-            config={
-                "model": model_args.model_name_or_path,
-                "data_path": data_args.data_path,
-                "data_length": data_args.data_length,
-                "data_percent": data_args.data_percent,
-                "tune_layers": training_args.tune_layers,
-                "learning_rate": training_args.learning_rate,
-                "batch_size": training_args.per_device_train_batch_size,
-                "max_steps": training_args.max_steps,
-            }
+            config=training_args,
+            settings=wandb.Settings(start_method="fork")
         )
 
     model = transformers.AutoModelForCausalLM.from_pretrained(
@@ -520,18 +508,17 @@ def train():
 
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
 
-    # Print example data
-    print_dataset_examples(data_module['train_dataset'])
+    # Log model parameters only on main process
+    if training_args.local_rank in {-1, 0}:
+        log_model_parameters(model, os.path.join(training_args.output_dir, "model_params.log"))
+        print_dataset_examples(data_module['train_dataset'])
 
     # Add layer freezing after model loading
     if training_args.tune_layers != "all":
         freeze_layers(model, training_args.tune_layers)
-    # Log parameter details after freezing
-    os.makedirs(training_args.output_dir, exist_ok=True)
-    log_model_parameters(model, os.path.join(training_args.output_dir, "model_params.log"))
 
     # Log model parameter stats to wandb
-    if training_args.report_to == "wandb":
+    if training_args.local_rank in {-1, 0} and "wandb" in training_args.report_to:
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         wandb.log({
@@ -546,10 +533,13 @@ def train():
     trainer.save_state()
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
 
-    if training_args.report_to == "wandb":
-        wandb.finish()
+    # Log dataset statistics only on main process
+    # if training_args.local_rank in {-1, 0}:
+    #     log_dataset_statistics(data_module['train_dataset'])
 
-    # log_dataset_statistics(data_module['train_dataset'])
+    # Finish wandb only on main process
+    if training_args.local_rank in {-1, 0} and "wandb" in training_args.report_to:
+        wandb.finish()
 
 if __name__ == "__main__":
     train()
