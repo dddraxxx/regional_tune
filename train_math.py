@@ -26,6 +26,8 @@ from transformers import Trainer
 import argparse
 import json
 import random;random.seed(42)
+import wandb  # Add wandb import
+import re
 
 def _make_r_io_base(f, mode: str):
     if not isinstance(f, io.IOBase):
@@ -47,12 +49,14 @@ DEFAULT_UNK_TOKEN = "<unk>"
 PROMPT_DICT = {
     "prompt_input": (
         "Below is an instruction that describes a task, paired with an input that provides further context. "
-        "Write a response that appropriately completes the request.\n\n"
+        "Write a response that appropriately completes the request."
+        "End your response with 'The answer is: [your answer]'.\n\n"
         "### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:"
     ),
     "prompt_no_input": (
     "Below is an instruction that describes a task. "
-    "Write a response that appropriately completes the request.\n\n"
+    "Write a response that appropriately completes the request."
+    "End your response with 'The answer is: [your answer]'.\n\n"
     "### Instruction:\n{instruction}\n\n### Response:"
     ),
 }
@@ -83,6 +87,10 @@ class TrainingArguments(transformers.TrainingArguments):
         metadata={
             "help": "Layers to tune. Format: 'all' | '3' | '3-7' | '1,3,5' | '1-3,5,7-9'"
         },
+    )
+    report_to: str = field(
+        default="wandb",
+        metadata={"help": "Report to wandb or not"},
     )
 
 
@@ -200,10 +208,11 @@ class SupervisedDataset(Dataset):
         if 'instruction' in list_data_dict[0]:
             pass
         elif 'question' in list_data_dict[0]:  # GSM8K format
+            # Process GSM8K answers to match our required answer format
             list_data_dict = [{
-                'instruction': data['question'].split('\n')[0],
-                'input': get_input(data['question']),
-                'output': data['answer']
+                'instruction': data['question'],  # Full problem as instruction
+                'input': '',                      # No separate input needed
+                'output': f"{data['answer'].rsplit('####', 1)[0].strip()} The answer is: {data['answer'].split('####')[-1].strip()}"
             } for data in list_data_dict]
         else:  # MetaMath format with 'query'
             list_data_dict = [{'instruction':data['query'].split('\n')[0],
@@ -211,6 +220,7 @@ class SupervisedDataset(Dataset):
                              'output':data['response']}
                             for data in list_data_dict]
 
+        self.list_data_dict = list_data_dict
         sources = [
             prompt_input.format_map(example) if example.get("input", "") != "" else prompt_no_input.format_map(example)
             for example in list_data_dict
@@ -439,9 +449,47 @@ def log_dataset_statistics(dataset, log_file: str = "dataset_stats.log"):
 
     logging.info(f"Dataset statistics logged to {log_file}")
 
+def print_dataset_examples(dataset, num_examples=1):
+    """Print example data from the dataset.
+
+    Args:
+        dataset: SupervisedDataset instance
+        num_examples: Number of examples to print
+    """
+    logging.info(f"\n{'='*40} Dataset Examples {'='*40}")
+    for i in range(min(num_examples, len(dataset.list_data_dict))):
+        example = dataset.list_data_dict[i]
+        logging.info(f"\nExample {i+1}:")
+        logging.info(f"Instruction: {example['instruction']}")
+        logging.info(f"Input: {example.get('input', '')}")
+        logging.info(f"Output: {example['output']}")
+        logging.info(f"\nFormatted Source:")
+        logging.info(dataset.sources[i])
+        logging.info(f"Target: {dataset.targets[i]}")
+        logging.info(f"{'-'*90}")
+
 def train():
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args, remaining_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
+
+    # Initialize wandb
+    if training_args.report_to == "wandb":
+        # Extract dataset name from data path
+        dataset_name = os.path.basename(data_args.data_path).split('.')[0]
+        output_dir_base = training_args.output_dir.split('/')[-1],
+        wandb.init(
+            name=f"{dataset_name}.{output_dir_base}",
+            config={
+                "model": model_args.model_name_or_path,
+                "data_path": data_args.data_path,
+                "data_length": data_args.data_length,
+                "data_percent": data_args.data_percent,
+                "tune_layers": training_args.tune_layers,
+                "learning_rate": training_args.learning_rate,
+                "batch_size": training_args.per_device_train_batch_size,
+                "max_steps": training_args.max_steps,
+            }
+        )
 
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
@@ -472,17 +520,34 @@ def train():
 
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
 
+    # Print example data
+    print_dataset_examples(data_module['train_dataset'])
+
     # Add layer freezing after model loading
     if training_args.tune_layers != "all":
         freeze_layers(model, training_args.tune_layers)
     # Log parameter details after freezing
     os.makedirs(training_args.output_dir, exist_ok=True)
     log_model_parameters(model, os.path.join(training_args.output_dir, "model_params.log"))
+
+    # Log model parameter stats to wandb
+    if training_args.report_to == "wandb":
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        wandb.log({
+            "total_parameters": total_params,
+            "trainable_parameters": trainable_params,
+            "frozen_parameters": total_params - trainable_params,
+            "trainable_percentage": trainable_params / total_params * 100,
+        })
+
     trainer = Trainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
     trainer.train()
     trainer.save_state()
-    # if os.environ.get('LOCAL_RANK') == '0':
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
+
+    if training_args.report_to == "wandb":
+        wandb.finish()
 
     # log_dataset_statistics(data_module['train_dataset'])
 

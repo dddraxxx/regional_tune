@@ -25,7 +25,7 @@ def is_number(s):
     return False
 
 def extract_answer_number(completion):
-    text = completion.split('The answer is: ')
+    text = completion.lower().split('the answer is: ')
     if len(text) > 1:
         extract_ans = text[-1].strip()
         match = re.search(r'[\-+]?\d*[\.,/]?\d+', extract_ans)
@@ -72,8 +72,9 @@ def gsm8k_test(model, data_path, start=0, end=MAX_INT, batch_size=1, tensor_para
     gsm8k_answers = []
     problem_prompt = (
         "Below is an instruction that describes a task. "
-        "Write a response that appropriately completes the request.\n\n"
-        "### Instruction:\n{instruction}\n\n### Response: Let's think step by step."
+        "Write a response that appropriately completes the request."
+        "End your response with 'The answer is: [your answer]'.\n\n"
+        "### Instruction:\n{instruction}\n\n### Response: Let's think step by step. "
     )
     print('promt =====', problem_prompt)
     with open(data_path,"r+", encoding="utf8") as f:
@@ -130,7 +131,7 @@ def gsm8k_test(model, data_path, start=0, end=MAX_INT, batch_size=1, tensor_para
         })
 
     acc = sum(result) / len(result)
-    print('len invalid outputs ====', len(invalid_outputs), ', valid_outputs===', invalid_outputs)
+    print(f'Invalid outputs: {len(invalid_outputs)} out of {len(result)} total samples')
     print('start===', start, ', end====', end)
     print('gsm8k length====', len(result), ', gsm8k acc====', acc)
 
@@ -198,7 +199,10 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     if not args.output_dir:
-        model_rel_path = os.path.relpath(args.model, 'checkpoints/')
+        if args.model.startswith('meta-llama/'):
+            model_rel_path = 'gsm8k/' + args.model.split('/')[-1]  # Use full repo name as path
+        else:
+            model_rel_path = os.path.relpath(args.model, 'checkpoints/')
         args.output_dir = f'outputs/{model_rel_path}'
     results = gsm8k_test(
         model=args.model,

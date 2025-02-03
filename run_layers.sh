@@ -1,5 +1,7 @@
 export data='metamath'
 export data='gsm8k'
+export WANDB_PROJECT='math_tune_layers'
+wandb online
 
 ############### Layers ###############
 bash run.sh

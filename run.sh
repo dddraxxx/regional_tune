@@ -7,7 +7,7 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.10/site-packages/nvidia/nvjitli
 
 # Add dataset choice
 export DATASET=${data:-"metamath"}  # Default to metamath
-export DATA_PERCENT=${dp:-100}  # Default to 100% of data
+dp=${dp:-100}  # Default to 100% of data
 
 # total_batch_size=128
 case $DATASET in
@@ -30,7 +30,7 @@ case $DATASET in
             wget https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/train.jsonl -O "$DATA_PATH"
         fi
         total_batch_size=64
-        ep=${ep:-1}
+        ep=${ep:-3}
         ;;
     *)
         echo "Unknown dataset: $DATASET"
@@ -46,8 +46,8 @@ export MASTER_ADDR="localhost"
 export MASTER_PORT=$(expr 10000 + $(od -An -N2 -i /dev/urandom) % 10000)
 export GLOO_SOCKET_IFNAME="lo"
 export NCCL_SOCKET_IFNAME="lo"
-export WANDB_DISABLED=true
-wandb offline
+# export WANDB_DISABLED=true
+# wandb offline
 
 # tune layers
 tune_layers=${l:-"all"}
@@ -78,7 +78,7 @@ if [ "$eval_only" != "1" ]; then
         --model_name_or_path $MODEL_PATH \
         --data_path $DATA_PATH \
         --data_length 10000000 \
-        --data_percent $DATA_PERCENT \
+        --data_percent $dp \
         --bf16 True \
         --output_dir $SAVE_PATH \
         --num_train_epochs $ep \
