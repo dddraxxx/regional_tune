@@ -511,6 +511,7 @@ def train():
     # Log model parameters only on main process
     if training_args.local_rank in {-1, 0}:
         log_model_parameters(model, os.path.join(training_args.output_dir, "model_params.log"))
+        log_dataset_statistics(data_module['train_dataset'], os.path.join(training_args.output_dir, "dataset_stats.log"))
         print_dataset_examples(data_module['train_dataset'])
 
     # Add layer freezing after model loading
@@ -532,10 +533,6 @@ def train():
     trainer.train()
     trainer.save_state()
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
-
-    # Log dataset statistics only on main process
-    # if training_args.local_rank in {-1, 0}:
-    #     log_dataset_statistics(data_module['train_dataset'])
 
     # Finish wandb only on main process
     if training_args.local_rank in {-1, 0} and "wandb" in training_args.report_to:
