@@ -21,9 +21,5 @@ if [ "$tune_layers" != "all" ]; then
     SAVE_PATH="${SAVE_PATH}_l${tune_layers}"
 fi
 
-total_batch_size=128
-per_device_train_batch_size=2
-gradient_accumulation_steps=$((total_batch_size / per_device_train_batch_size))
-
 python eval_gsm8k.py --model $SAVE_PATH --data_file ./data/test/GSM8K_test.jsonl
 python eval_math.py --model $SAVE_PATH --data_file ./data/test/MATH_test.jsonl
