@@ -8,6 +8,10 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.10/site-packages/nvidia/nvjitli
 # Add dataset choice
 export DATASET=${data:-"metamath"}  # Default to metamath
 dp=${dp:-100}  # Default to 100% of data
+train_py=${train_py:-"train_math.py"}
+if [ "$DATASET" = "med" ]; then
+    train_py="train_med.py"
+fi
 
 # total_batch_size=128
 case $DATASET in
@@ -19,6 +23,17 @@ case $DATASET in
             git clone https://huggingface.co/datasets/meta-math/MetaMathQA "$PARENT_DIR"
         fi
         total_batch_size=128
+        ep=${ep:-3}
+        ;;
+    "med")
+        export DATA_PATH="data/medical_meadow/medical_meadow_medqa.json"
+        if [ ! -f "$DATA_PATH" ]; then
+            echo "Medical MeadowQA data not found, downloading from Hugging Face..."
+            PARENT_DIR=$(dirname "$DATA_PATH")
+            mkdir -p "$PARENT_DIR"
+            git clone https://huggingface.co/datasets/medalpaca/medical_meadow_medqa "$PARENT_DIR"
+        fi
+        total_batch_size=64  # Using a smaller batch size like GSM8K since medical data might be complex
         ep=${ep:-3}
         ;;
     "gsm8k")
@@ -74,7 +89,7 @@ eval_only=${eval_only:-false}
 if [ "$eval_only" != "1" ]; then
     ddp_cmd="torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=${num_gpus} --nnodes=1"
     py_cmd="python"
-    args=("train_math.py \
+    args=("${train_py} \
         --model_name_or_path $MODEL_PATH \
         --data_path $DATA_PATH \
         --data_length 10000000 \
@@ -103,6 +118,21 @@ if [ "$eval_only" != "1" ]; then
     else
         ${py_cmd} ${args}
     fi
+elif [ "$eval_only" = "1" ]; then
+    SAVE_PATH=$MODEL_PATH
 fi
-python eval_gsm8k.py --model $SAVE_PATH --data_file ./data/test/GSM8K_test.jsonl
-python eval_math.py --model $SAVE_PATH --data_file ./data/test/MATH_test.jsonl
+
+if [ "$DATASET" = "gsm8k" ] || [ "$DATASET" = "metamath" ]; then
+    python eval_gsm8k.py --model $SAVE_PATH --data_file ./data/test/GSM8K_test.jsonl
+    python eval_math.py --model $SAVE_PATH --data_file ./data/test/MATH_test.jsonl
+elif [ "$DATASET" = "med" ]; then
+    # Check and download medical test data if needed
+    TEST_DATA_PATH="./data/test/medqa_test.jsonl"
+    if [ ! -f "$TEST_DATA_PATH" ]; then
+        echo "Medical test data not found, downloading from Hugging Face..."
+        mkdir -p $(dirname "$TEST_DATA_PATH")
+        python build_medqa_jsonl.py
+    fi
+    echo "Evaluating model on $TEST_DATA_PATH"
+    python eval_med.py --model $SAVE_PATH --data_file "$TEST_DATA_PATH"
+fi

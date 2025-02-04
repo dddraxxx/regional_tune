@@ -1,13 +1,14 @@
-export data='metamath'
+# export data='metamath'
 # export data='gsm8k'
-export WANDB_PROJECT='math_partial_metamath_tune_layers'
+export data='med'
+export WANDB_PROJECT='med_tune_layers'
 wandb online
 
-export ep=1
-export dp=33
+# export ep=1
+# export dp=33
 
 ############### Layers ###############
-# bash run.sh
+bash run.sh
 # l=0-20 bash run.sh
 # l=0-10 bash run.sh
 # l=0-15 bash run.sh
