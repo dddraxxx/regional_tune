@@ -132,23 +132,24 @@ def test_hendrycks_math(model, data_path, start=0, end=MAX_INT, batch_size=1, te
         'detailed_results': detailed_results
     }
 
-def save_results(results, output_dir):
+def save_results(results, output_dir, test_name="math"):
     """
     Save evaluation results to a directory structure.
 
     Args:
         results (dict): Dictionary containing evaluation results
         output_dir (str): Directory path to save results
+        test_name (str): Name of the test (e.g., 'math', 'gsm8k') for file naming
 
     Creates:
         - output_dir/
-            - detailed_results.json: Full evaluation details
-            - summary.csv: Basic metrics in CSV format
+            - detailed_results_{test_name}.json: Full evaluation details
+            - summary.csv: Basic metrics in CSV format with test_name column
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    # Save detailed results as JSON
-    detailed_path = os.path.join(output_dir, 'detailed_results.json')
+    # Save detailed results as JSON with test name
+    detailed_path = os.path.join(output_dir, f'detailed_results_{test_name}.json')
     with open(detailed_path, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
@@ -156,6 +157,7 @@ def save_results(results, output_dir):
     summary_path = os.path.join(output_dir, 'summary.csv')
     summary_data = {
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'test_name': test_name,
         'accuracy': results['accuracy'],
         'total_samples': results['total_samples'],
         'invalid_count': results['invalid_count'],
@@ -205,4 +207,4 @@ if __name__ == "__main__":
 
     # Save results to directory if specified
     if args.output_dir:
-        save_results(results, args.output_dir)
+        save_results(results, args.output_dir, test_name="math")
