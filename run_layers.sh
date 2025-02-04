@@ -1,6 +1,7 @@
 # export data='metamath'
 # export data='gsm8k'
 export data='med'
+export eval_only=0
 export WANDB_PROJECT='med_tune_layers'
 wandb online
 

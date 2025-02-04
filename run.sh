@@ -102,9 +102,9 @@ if [ "$eval_only" != "1" ]; then
         --per_device_eval_batch_size 4 \
         --gradient_accumulation_steps $gradient_accumulation_steps \
         --evaluation_strategy no \
-        --save_strategy steps \
+        --save_strategy no \
         --save_steps 1000 \
-        --save_total_limit 2 \
+        --save_total_limit 1 \
         --learning_rate 2e-5 \
         --weight_decay 0. \
         --warmup_ratio 0.03 \
