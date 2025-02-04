@@ -1,5 +1,5 @@
 export data='metamath'
-export data='gsm8k'
+# export data='gsm8k'
 export WANDB_PROJECT='math_partial_metamath_tune_layers'
 wandb online
 
@@ -17,8 +17,8 @@ export dp=33
 
 # tune the continuous layers, 8 layers as a block
 for i in {0..31..8}; do
-    l=$0-$(($i+7)) bash run.sh
-    l=$31-$((31-i+1)) bash run.sh
+    l=0-$(($i+7)) bash run.sh
+    l=31-$((31-i+1)) bash run.sh
 done
 
 l=8-23 bash run.sh
